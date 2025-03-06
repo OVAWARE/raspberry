@@ -9,3 +9,4 @@ whisper
 torch
 sounddevice
 soundfile
+openai-whisper

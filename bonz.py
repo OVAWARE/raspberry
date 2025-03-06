@@ -8,7 +8,7 @@ import platform
 import subprocess
 import numpy as np
 import torch
-import whisper
+from openai import whisper
 import sounddevice as sd
 import soundfile as sf
 import wave
@@ -50,6 +50,14 @@ def listen_for_wake_word(wake_word="bonz", timeout=None):
         # Clean up temp file
         os.unlink(temp_filename)
         
+        # Print the transcription with wake word highlighted in red if present
+        if wake_word in transcription:
+            # Replace wake word with red-colored version
+            colored_transcription = transcription.replace(wake_word, f"\033[91m{wake_word}\033[0m")
+            print(f"Heard: '{colored_transcription}'")
+        else:
+            print(f"Heard: '{transcription}'")
+        
         # Check if wake word is in transcription (with some flexibility)
         if wake_word in transcription or any(word.startswith(wake_word[:-1]) for word in transcription.split()):
             print(f"Wake word detected: '{transcription}'")
@@ -87,6 +95,7 @@ def record_user_prompt():
         rms = np.sqrt(np.mean(chunk**2))
         if rms < SILENCE_THRESHOLD:
             silent_chunks += 1
+            print(f"Silence detected ({silent_chunks}/{silent_chunks_threshold})...")
         else:
             silent_chunks = 0
         
