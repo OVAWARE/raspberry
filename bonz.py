@@ -9,9 +9,9 @@ import subprocess
 import numpy as np
 import torch
 import whisper
-import pyaudio
+import sounddevice as sd
+import soundfile as sf
 import wave
-import audioop
 
 def listen_for_wake_word(wake_word="bonz", timeout=None):
     """Listen for the wake word using whisper-tiny model"""
@@ -21,43 +21,27 @@ def listen_for_wake_word(wake_word="bonz", timeout=None):
     model_tiny = whisper.load_model("tiny")
     
     # Audio parameters
-    FORMAT = pyaudio.paInt16
-    CHANNELS = 1
     RATE = 16000
-    CHUNK = 1024
-    
-    audio = pyaudio.PyAudio()
-    stream = audio.open(format=FORMAT, channels=CHANNELS,
-                        rate=RATE, input=True,
-                        frames_per_buffer=CHUNK)
+    CHANNELS = 1
+    DURATION = 2  # Listen for 2 seconds at a time
     
     start_time = time.time()
-    frames = []
     
     # Listen for 2 seconds at a time to check for wake word
     while True:
         if timeout and (time.time() - start_time) > timeout:
-            stream.stop_stream()
-            stream.close()
-            audio.terminate()
             return False
         
-        # Collect 2 seconds of audio
-        frames = []
-        for _ in range(0, int(RATE / CHUNK * 2)):
-            data = stream.read(CHUNK)
-            frames.append(data)
+        # Record audio for DURATION seconds
+        print("Listening...")
+        recording = sd.rec(int(DURATION * RATE), samplerate=RATE, channels=CHANNELS, dtype='float32')
+        sd.wait()  # Wait until recording is finished
         
         # Save to temporary WAV file
         with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as temp_wav:
             temp_filename = temp_wav.name
         
-        wf = wave.open(temp_filename, 'wb')
-        wf.setnchannels(CHANNELS)
-        wf.setsampwidth(audio.get_sample_size(FORMAT))
-        wf.setframerate(RATE)
-        wf.writeframes(b''.join(frames))
-        wf.close()
+        sf.write(temp_filename, recording, RATE, 'PCM_16')
         
         # Transcribe with whisper tiny
         result = model_tiny.transcribe(temp_filename)
@@ -69,12 +53,7 @@ def listen_for_wake_word(wake_word="bonz", timeout=None):
         # Check if wake word is in transcription (with some flexibility)
         if wake_word in transcription or any(word.startswith(wake_word[:-1]) for word in transcription.split()):
             print(f"Wake word detected: '{transcription}'")
-            stream.stop_stream()
-            stream.close()
-            audio.terminate()
             return True
-        
-        print("Listening...")
 
 def record_user_prompt():
     """Record user's prompt using whisper-small model until silence is detected"""
@@ -84,56 +63,47 @@ def record_user_prompt():
     model_small = whisper.load_model("small")
     
     # Audio parameters
-    FORMAT = pyaudio.paInt16
-    CHANNELS = 1
     RATE = 16000
-    CHUNK = 1024
-    SILENCE_THRESHOLD = 500  # Adjust based on your microphone and environment
+    CHANNELS = 1
+    CHUNK_DURATION = 0.5  # Record in 0.5 second chunks
+    SILENCE_THRESHOLD = 0.01  # Adjust based on your microphone and environment
     SILENCE_DURATION = 5  # 5 seconds of silence to end recording
-    
-    audio = pyaudio.PyAudio()
-    stream = audio.open(format=FORMAT, channels=CHANNELS,
-                        rate=RATE, input=True,
-                        frames_per_buffer=CHUNK)
     
     frames = []
     silent_chunks = 0
-    silent_chunks_threshold = int(SILENCE_DURATION * RATE / CHUNK)
+    silent_chunks_threshold = int(SILENCE_DURATION / CHUNK_DURATION)
     
     print("Speak your prompt now...")
     
     # Record until silence is detected
     while True:
-        data = stream.read(CHUNK)
-        frames.append(data)
+        # Record audio for CHUNK_DURATION seconds
+        chunk = sd.rec(int(CHUNK_DURATION * RATE), samplerate=RATE, channels=CHANNELS, dtype='float32')
+        sd.wait()  # Wait until recording is finished
         
-        # Check for silence
-        rms = audioop.rms(data, 2)
+        frames.append(chunk)
+        
+        # Check for silence - calculate RMS of the audio chunk
+        rms = np.sqrt(np.mean(chunk**2))
         if rms < SILENCE_THRESHOLD:
             silent_chunks += 1
         else:
             silent_chunks = 0
         
-        # If 5 seconds of silence, stop recording
+        # If SILENCE_DURATION seconds of silence, stop recording
         if silent_chunks >= silent_chunks_threshold:
             break
     
     print("Finished recording, transcribing...")
     
-    stream.stop_stream()
-    stream.close()
-    audio.terminate()
+    # Combine all audio chunks
+    audio_data = np.vstack(frames)
     
     # Save to temporary WAV file
     with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as temp_wav:
         temp_filename = temp_wav.name
     
-    wf = wave.open(temp_filename, 'wb')
-    wf.setnchannels(CHANNELS)
-    wf.setsampwidth(audio.get_sample_size(FORMAT))
-    wf.setframerate(RATE)
-    wf.writeframes(b''.join(frames))
-    wf.close()
+    sf.write(temp_filename, audio_data, RATE, 'PCM_16')
     
     # Transcribe with whisper small
     result = model_small.transcribe(temp_filename)

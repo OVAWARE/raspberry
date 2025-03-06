@@ -7,3 +7,5 @@ numpy
 pyaudio
 whisper
 torch
+sounddevice
+soundfile
