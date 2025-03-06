@@ -2,3 +2,5 @@ requests
 openai
 pygame
 gtts
+opencv-python
+numpy
