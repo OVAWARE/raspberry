@@ -13,7 +13,7 @@ import sounddevice as sd
 import soundfile as sf
 import wave
 
-def listen_for_wake_word(wake_word="bonz", timeout=None):
+def listen_for_wake_word(wake_word="pie", timeout=None):
     """Listen for the wake word using whisper-tiny model"""
     print(f"Listening for wake word: '{wake_word}'...")
     
@@ -146,6 +146,7 @@ def GenerateOpenrouter(prompt):
     data = {
         "model": "qwen/qwq-32b:free",
         "messages": [
+            {"role": "system", "content": "You are a helpful assistant, you should respond in short setences"},
             {"role": "user", "content": prompt}
         ]
     }
@@ -209,7 +210,7 @@ def main():
     
     while True:
         # Listen for wake word
-        if listen_for_wake_word(wake_word="bonz"):
+        if listen_for_wake_word(wake_word="pie"):
             # Record and transcribe user prompt
             user_prompt = record_user_prompt()
             
