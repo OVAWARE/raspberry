@@ -8,10 +8,11 @@ import platform
 import subprocess
 import numpy as np
 import torch
-from openai import whisper
+import whisper
 import sounddevice as sd
 import soundfile as sf
 import wave
+import threading
 
 def listen_for_wake_word(wake_word="pie", timeout=None):
     """Listen for the wake word using whisper-tiny model"""
@@ -103,26 +104,57 @@ def record_user_prompt():
         if silent_chunks >= silent_chunks_threshold:
             break
     
-    print("Finished recording, transcribing...")
+    print("Processing your prompt...")
     
-    # Combine all audio chunks
-    audio_data = np.vstack(frames)
+    # Start a new thread to continue listening while transcribing
+    continue_listening = True
+    buffer_frames = []
     
-    # Save to temporary WAV file
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as temp_wav:
-        temp_filename = temp_wav.name
+    def background_listening():
+        nonlocal buffer_frames
+        while continue_listening:
+            chunk = sd.rec(int(CHUNK_DURATION * RATE), samplerate=RATE, channels=CHANNELS, dtype='float32')
+            sd.wait()
+            buffer_frames.append(chunk)
     
-    sf.write(temp_filename, audio_data, RATE, 'PCM_16')
+    # Start background listening thread
+    listen_thread = threading.Thread(target=background_listening)
+    listen_thread.start()
     
-    # Transcribe with whisper small
-    result = model_small.transcribe(temp_filename)
-    transcription = result["text"].strip()
-    
-    # Clean up temp file
-    os.unlink(temp_filename)
-    
-    print(f"Transcribed prompt: '{transcription}'")
-    return transcription
+    try:
+        # Combine all audio chunks
+        audio_data = np.vstack(frames)
+        
+        # Save to temporary WAV file
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as temp_wav:
+            temp_filename = temp_wav.name
+        
+        sf.write(temp_filename, audio_data, RATE, 'PCM_16')
+        
+        print("Transcribing...")
+        # Transcribe with whisper small
+        result = model_small.transcribe(temp_filename)
+        transcription = result["text"].strip()
+        
+        # Clean up temp file
+        os.unlink(temp_filename)
+        
+        print(f"Transcribed prompt: '{transcription}'")
+        return transcription
+    finally:
+        # Stop background listening and collect any new audio
+        continue_listening = False
+        listen_thread.join()
+        
+        # If there was meaningful audio during transcription, process it
+        if buffer_frames:
+            # Check if there's actual speech in the buffer
+            buffer_audio = np.vstack(buffer_frames)
+            rms = np.sqrt(np.mean(buffer_audio**2))
+            if rms > SILENCE_THRESHOLD:
+                print("Detected additional speech during processing!")
+                # You could handle this by appending to frames and re-transcribing,
+                # or by returning a flag indicating more audio is available
 
 def GenerateOpenrouter(prompt):
     # You'll need to get an API key from https://openrouter.ai/
