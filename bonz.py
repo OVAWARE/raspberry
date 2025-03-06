@@ -6,6 +6,144 @@ from gtts import gTTS
 import tempfile
 import platform
 import subprocess
+import numpy as np
+import torch
+import whisper
+import pyaudio
+import wave
+import audioop
+
+def listen_for_wake_word(wake_word="bonz", timeout=None):
+    """Listen for the wake word using whisper-tiny model"""
+    print(f"Listening for wake word: '{wake_word}'...")
+    
+    # Load the tiny model for wake word detection
+    model_tiny = whisper.load_model("tiny")
+    
+    # Audio parameters
+    FORMAT = pyaudio.paInt16
+    CHANNELS = 1
+    RATE = 16000
+    CHUNK = 1024
+    
+    audio = pyaudio.PyAudio()
+    stream = audio.open(format=FORMAT, channels=CHANNELS,
+                        rate=RATE, input=True,
+                        frames_per_buffer=CHUNK)
+    
+    start_time = time.time()
+    frames = []
+    
+    # Listen for 2 seconds at a time to check for wake word
+    while True:
+        if timeout and (time.time() - start_time) > timeout:
+            stream.stop_stream()
+            stream.close()
+            audio.terminate()
+            return False
+        
+        # Collect 2 seconds of audio
+        frames = []
+        for _ in range(0, int(RATE / CHUNK * 2)):
+            data = stream.read(CHUNK)
+            frames.append(data)
+        
+        # Save to temporary WAV file
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as temp_wav:
+            temp_filename = temp_wav.name
+        
+        wf = wave.open(temp_filename, 'wb')
+        wf.setnchannels(CHANNELS)
+        wf.setsampwidth(audio.get_sample_size(FORMAT))
+        wf.setframerate(RATE)
+        wf.writeframes(b''.join(frames))
+        wf.close()
+        
+        # Transcribe with whisper tiny
+        result = model_tiny.transcribe(temp_filename)
+        transcription = result["text"].lower().strip()
+        
+        # Clean up temp file
+        os.unlink(temp_filename)
+        
+        # Check if wake word is in transcription (with some flexibility)
+        if wake_word in transcription or any(word.startswith(wake_word[:-1]) for word in transcription.split()):
+            print(f"Wake word detected: '{transcription}'")
+            stream.stop_stream()
+            stream.close()
+            audio.terminate()
+            return True
+        
+        print("Listening...")
+
+def record_user_prompt():
+    """Record user's prompt using whisper-small model until silence is detected"""
+    print("Listening for your prompt...")
+    
+    # Load the small model for detailed transcription
+    model_small = whisper.load_model("small")
+    
+    # Audio parameters
+    FORMAT = pyaudio.paInt16
+    CHANNELS = 1
+    RATE = 16000
+    CHUNK = 1024
+    SILENCE_THRESHOLD = 500  # Adjust based on your microphone and environment
+    SILENCE_DURATION = 5  # 5 seconds of silence to end recording
+    
+    audio = pyaudio.PyAudio()
+    stream = audio.open(format=FORMAT, channels=CHANNELS,
+                        rate=RATE, input=True,
+                        frames_per_buffer=CHUNK)
+    
+    frames = []
+    silent_chunks = 0
+    silent_chunks_threshold = int(SILENCE_DURATION * RATE / CHUNK)
+    
+    print("Speak your prompt now...")
+    
+    # Record until silence is detected
+    while True:
+        data = stream.read(CHUNK)
+        frames.append(data)
+        
+        # Check for silence
+        rms = audioop.rms(data, 2)
+        if rms < SILENCE_THRESHOLD:
+            silent_chunks += 1
+        else:
+            silent_chunks = 0
+        
+        # If 5 seconds of silence, stop recording
+        if silent_chunks >= silent_chunks_threshold:
+            break
+    
+    print("Finished recording, transcribing...")
+    
+    stream.stop_stream()
+    stream.close()
+    audio.terminate()
+    
+    # Save to temporary WAV file
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as temp_wav:
+        temp_filename = temp_wav.name
+    
+    wf = wave.open(temp_filename, 'wb')
+    wf.setnchannels(CHANNELS)
+    wf.setsampwidth(audio.get_sample_size(FORMAT))
+    wf.setframerate(RATE)
+    wf.writeframes(b''.join(frames))
+    wf.close()
+    
+    # Transcribe with whisper small
+    result = model_small.transcribe(temp_filename)
+    transcription = result["text"].strip()
+    
+    # Clean up temp file
+    os.unlink(temp_filename)
+    
+    print(f"Transcribed prompt: '{transcription}'")
+    return transcription
 
 def GenerateOpenrouter(prompt):
     # You'll need to get an API key from https://openrouter.ai/
@@ -87,13 +225,24 @@ def text_to_speech(text):
         print(text)
 
 def main():
-    # Generate poem
+    print("Starting Bonz - your voice-activated poem generator")
+    print("Say 'bonz' to activate")
+    
     while True:
-        poem = GenerateOpenrouter(input("Enter a prompt: "))
+        # Listen for wake word
+        if listen_for_wake_word(wake_word="bonz"):
+            # Record and transcribe user prompt
+            user_prompt = record_user_prompt()
+            
+            # Generate poem
+            poem = GenerateOpenrouter(user_prompt)
+            
+            if poem:
+                # Convert to speech
+                text_to_speech(poem)
         
-        if poem:
-            # Convert to speech
-            text_to_speech(poem)
+        # Small delay before listening again
+        time.sleep(0.5)
 
 if __name__ == "__main__":
     main()

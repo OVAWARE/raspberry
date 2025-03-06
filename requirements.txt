@@ -4,3 +4,6 @@ pygame
 gtts
 opencv-python
 numpy
+pyaudio
+whisper
+torch
