@@ -7,7 +7,7 @@ import tempfile
 import platform
 import subprocess
 
-def generate_poem_with_openrouter():
+def GenerateOpenrouter(prompt):
     # You'll need to get an API key from https://openrouter.ai/
     openrouter_api_key = os.environ.get("OPENROUTER_API_KEY")
     
@@ -29,7 +29,7 @@ def generate_poem_with_openrouter():
     data = {
         "model": "qwen/qwq-32b:free",
         "messages": [
-            {"role": "user", "content": "please output a short poem"}
+            {"role": "user", "content": prompt}
         ]
     }
     
@@ -88,11 +88,12 @@ def text_to_speech(text):
 
 def main():
     # Generate poem
-    poem = generate_poem_with_openrouter()
-    
-    if poem:
-        # Convert to speech
-        text_to_speech(poem)
+    while True:
+        poem = GenerateOpenrouter(input("Enter a prompt: "))
+        
+        if poem:
+            # Convert to speech
+            text_to_speech(poem)
 
 if __name__ == "__main__":
     main()
